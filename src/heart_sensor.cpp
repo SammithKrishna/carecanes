@@ -17,8 +17,21 @@ bool HeartRateSensor::begin() {
     return true;
 }
 
+void HeartRateSensor::reset60sAvg() {
+    bpmSum = 0;
+    bpmCount = 0;
+    avgStartTime = millis();
+}
+
+float HeartRateSensor::get60sAvg() {
+    if (bpmCount == 0) return 0;
+    return bpmSum / bpmCount;
+}
+
 void HeartRateSensor::update() {
     long irValue = sensor.getIR();
+
+    if (avgStartTime == 0) avgStartTime = millis();
 
     if (checkForBeat(irValue) == true) {
         long delta = millis() - lastBeat;
@@ -26,7 +39,8 @@ void HeartRateSensor::update() {
 
         beatsPerMinute = 60.0f / (delta / 1000.0f);
 
-        if (beatsPerMinute < 255 && beatsPerMinute > 20) {
+        // Only accept BPM in 30-220 range for all calculations
+        if (beatsPerMinute <= 220 && beatsPerMinute >= 30) {
             rates[rateSpot++] = (byte)beatsPerMinute;
             rateSpot %= RATE_SIZE;
 
@@ -35,21 +49,21 @@ void HeartRateSensor::update() {
                 beatAvg += rates[x];
             }
             beatAvg /= RATE_SIZE;
+
+            // 60s average accumulation
+            if (millis() - avgStartTime <= 60000) {
+                bpmSum += beatsPerMinute;
+                bpmCount++;
+            }
         }
     }
 
-    Serial.print("IR=");
-    Serial.print(irValue);
-    Serial.print(", BPM=");
-    Serial.print(beatsPerMinute);
-    Serial.print(", Avg BPM=");
-    Serial.print(beatAvg);
-
-    if (irValue < 50000) {
-        Serial.print(" No finger?");
+    // Only print 60s average every 60 seconds
+    if (millis() - lastPrintTime >= 60000) {
+        Serial.print("60s Average BPM: ");
+        Serial.println(get60sAvg());
+        lastPrintTime = millis();
     }
-
-    Serial.println();
 }
 
 long HeartRateSensor::getIR() {

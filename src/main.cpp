@@ -1,6 +1,8 @@
 #include "heart_sensor.h"
 
 HeartRateSensor heart;
+bool fingerDetected = false;
+unsigned long lastFingerCheck = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -15,6 +17,30 @@ void setup() {
 }
 
 void loop() {
-  heart.update();
+  long irValue = heart.getIR();
+
+  // Check for finger every 500ms
+  if (millis() - lastFingerCheck >= 500) {
+    if (irValue < 50000) {
+      if (fingerDetected) {
+        // Finger was removed during measurement
+        Serial.println("BPM CHECKER CANCELED - PLEASE TRY AGAIN");
+        fingerDetected = false;
+      }
+    } else {
+      if (!fingerDetected) {
+        Serial.println("Finger detected. Starting BPM measurement...");
+        fingerDetected = true;
+        heart.reset60sAvg();  // Start fresh 60s measurement
+      }
+    }
+    lastFingerCheck = millis();
+  }
+
+  // Only update heart sensor if finger is detected
+  if (fingerDetected) {
+    heart.update();
+  }
+
   delay(25);
 }

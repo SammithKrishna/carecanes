@@ -15,6 +15,12 @@ class HeartRateSensor {
     byte rates[RATE_SIZE] = {0};
     byte rateSpot = 0;
 
+    // For 60-second average
+    float bpmSum = 0;
+    int bpmCount = 0;
+    unsigned long avgStartTime = 0;
+    unsigned long lastPrintTime = 0;
+
   public:
     HeartRateSensor();
     bool begin();
@@ -22,6 +28,8 @@ class HeartRateSensor {
     long getIR();
     float getBPM() const;
     int getAvgBPM() const;
+    void reset60sAvg();
+    float get60sAvg();
 };
 
 #endif
