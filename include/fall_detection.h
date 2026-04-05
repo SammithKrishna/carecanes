@@ -10,5 +10,7 @@ struct accelData{
 accelData readings();
 void spacialReadings();
 void fall();
+void calibrateAccelerometer();
+extern bool fallDetected;
 
 #endif

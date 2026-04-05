@@ -12,14 +12,37 @@
 bool possibleFall = false;
 bool fallDetected = false;
 unsigned long fallStartTime = 0;
+unsigned long stillnessStart = 0;
+float magnitudeSum = 0;
+int magnitudeCount = 0;
+unsigned long avgWindowStart = 0;
+float prevMagnitude = 0;
 
 const float impact_threshold = 130.0; // subject to change
-const float stillness_threshold = 5; // also subject to change low movement after impact
+const float stillness_threshold = 5.0; // tolerates sensor noise and minor movement
+const float cancel_threshold = 80.0;  // only considerable movement cancels the fall
 const unsigned long confirm_time = 10000; 
 
-const float x0 = 300;
-const float y0 = 350;
-const float z0 = 350;
+float x0 = 0;
+float y0 = 0;
+float z0 = 0;
+
+void calibrateAccelerometer() {
+    Serial.println("Calibrating accelerometer... keep sensor still.");
+    long sumX = 0, sumY = 0, sumZ = 0;
+    for (int i = 0; i < 100; i++) {
+        sumX += analogRead(xPin);
+        sumY += analogRead(yPin);
+        sumZ += analogRead(zPin);
+        delay(10);
+    }
+    x0 = sumX / 100.0;
+    y0 = sumY / 100.0;
+    z0 = sumZ / 100.0;
+    Serial.print("Calibrated baseline - X:"); Serial.print(x0);
+    Serial.print(" Y:"); Serial.print(y0);
+    Serial.print(" Z:"); Serial.println(z0);
+}
 
 accelData readings(){
     accelData data;
@@ -59,31 +82,80 @@ void fall(){
     float magnitude = sqrt((dx*dx) + (dy*dy) + (dz*dz));
     Serial.println(magnitude);
 
-    if(!possibleFall && magnitude > impact_threshold){
+    if(!possibleFall && magnitude > impact_threshold && reading.z < 400){
         possibleFall = true;
         fallStartTime = millis();
-        Serial.println("Possible fall detected...");
+        stillnessStart = 0;
+        magnitudeSum = 0;
+        magnitudeCount = 0;
+        avgWindowStart = 0;  // will be set after the 3s settling period
+        prevMagnitude = magnitude;
+        Serial.println("Possible fall detected... waiting 3 seconds before checking for stillness.");
     }
     if(possibleFall){
         digitalWrite(potential, HIGH);
-        if(millis() - fallStartTime > confirm_time){
-            accelData newReading = readings();
-            float stillDx = fabs(newReading.x - reading.x);
-            float stillDy = fabs(newReading.y - reading.y);
-            float stillDz = fabs(newReading.z - reading.z);
 
-            float stillness = sqrt((stillDx * stillDx) + (stillDy * stillDy) + (stillDz * stillDz)); 
-            if(stillness < stillness_threshold){
-                fallDetected = true;
-                Serial.println("Fall Confirmed!");
-            } else {
-                Serial.println("Not a fall. Resetting.");
-                digitalWrite(potential, LOW);
-            }
-
-            possibleFall = false;
+        // Wait 3 seconds after impact before checking for stillness
+        // (allows initial tumbling/sliding to settle)
+        if (millis() - fallStartTime < 3000) {
+            return;
         }
 
+        // Start the avg window once the settling period has passed
+        if (avgWindowStart == 0) {
+            avgWindowStart = millis();
+            prevMagnitude = magnitude;
+            Serial.println("Settling period over. Now checking for stillness...");
+        }
+
+        // Accumulate change in magnitude for 5-second average
+        float deltaMagnitude = fabs(magnitude - prevMagnitude);
+        magnitudeSum += deltaMagnitude;
+        magnitudeCount++;
+        prevMagnitude = magnitude;
+
+        // Every 5 seconds, evaluate average change in magnitude
+        if (millis() - avgWindowStart >= 5000) {
+            float avgDelta = magnitudeSum / magnitudeCount;
+            Serial.print("5s avg magnitude change: ");
+            Serial.println(avgDelta);
+            magnitudeSum = 0;
+            magnitudeCount = 0;
+            avgWindowStart = millis();
+
+            if (avgDelta >= cancel_threshold) {
+                // Considerable sustained movement - false alarm
+                Serial.println("Considerable movement detected - false alarm. Resetting.");
+                possibleFall = false;
+                stillnessStart = 0;
+                digitalWrite(potential, LOW);
+            } else if (avgDelta < stillness_threshold) {
+                // Avg change is small enough - sensor is still
+                if (stillnessStart == 0) {
+                    stillnessStart = millis();
+                    Serial.println("Stillness detected, waiting to confirm...");
+                } else if (millis() - stillnessStart >= confirm_time) {
+                    // Sustained stillness confirmed - it's a fall
+                    fallDetected = true;
+                    possibleFall = false;
+                    Serial.println("Fall Confirmed!");
+                }
+            } else {
+                // Minor movement - reset stillness timer
+                if (stillnessStart != 0) {
+                    stillnessStart = 0;
+                    Serial.println("Minor movement, resetting stillness timer.");
+                }
+            }
+        }
+
+        // Safety timeout: if still possible fall after 30s with no confirmation, reset
+        if(possibleFall && millis() - fallStartTime > 30000){
+            possibleFall = false;
+            stillnessStart = 0;
+            Serial.println("Timeout - not a fall. Resetting.");
+            digitalWrite(potential, LOW);
+        }
     }
     if (fallDetected){
         digitalWrite(confirmed, HIGH);
