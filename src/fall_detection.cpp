@@ -27,7 +27,7 @@ bool ledBlinkState = false;
 const float impact_threshold = 130.0; // subject to change
 const float stillness_threshold = 7.0; // tolerates sensor noise and minor movement
 const float cancel_threshold = 80.0;  // only considerable movement cancels the fall
-const unsigned long confirm_time = 10000; 
+const unsigned long confirm_time = 10000;
 const int impact_samples_required = 3;               // debounce impact trigger
 const unsigned long possible_fall_cooldown = 6000;   // ignore retriggers for 6s after reset
 const unsigned long rearm_calm_time = 3000;          // calm time before allowing next potential trigger
@@ -36,6 +36,7 @@ const unsigned long led_blink_interval = 1000;        // slower LED blinking dur
 float x0 = 0;
 float y0 = 0;
 float z0 = 0;
+
 
 static void resetPossibleFallState(bool rearmTrigger) {
     possibleFall = false;
@@ -52,6 +53,7 @@ static void resetPossibleFallState(bool rearmTrigger) {
     lastPossibleFallEnd = millis();
     potentialTriggerArmed = rearmTrigger;
 }
+
 
 void calibrateAccelerometer() {
     Serial.println("Calibrating accelerometer... keep sensor still.");
@@ -97,6 +99,7 @@ void spacialReadings(){
     Serial.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
     delay(250);
 }
+
 
 void buzzOnce(int duration = 1000) {
     digitalWrite(MOTOR, HIGH);
@@ -163,13 +166,12 @@ void fall(){
         }
     }
     if(possibleFall){
-        // Non-blocking LED blink so fall logic can continue running.
+          // Non-blocking LED blink so fall logic can continue running.
         if (millis() - lastBlinkTime >= led_blink_interval) {
             ledBlinkState = !ledBlinkState;
             digitalWrite(LED, ledBlinkState ? HIGH : LOW);
             lastBlinkTime = millis();
         }
-
         // Wait 3 seconds after impact before checking for stillness
         // (allows initial tumbling/sliding to settle)
         if (millis() - fallStartTime < 3000) {
@@ -239,10 +241,6 @@ void fall(){
         }
     }
     if (fallDetected){
-        Serial.println("ALERT: Send the emergency signal!");
-        digitalWrite(LED, HIGH);  // Turn on LED to indicate fall detected
-        delay(5000); // Keep LED on for 5 seconds to indicate alert state
-        digitalWrite(LED, LOW);   // Turn off LED after alert
-        fallDetected = false;
+        digitalWrite(LED, HIGH);
     }
 }

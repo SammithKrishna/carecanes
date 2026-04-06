@@ -3,7 +3,7 @@
 
 #define MOTOR_PIN 8
 
-void turnOnMotorOn() {
+void turnOnMotor() {
     digitalWrite(MOTOR_PIN, HIGH);
 }
 
