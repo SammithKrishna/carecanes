@@ -5,8 +5,8 @@
 #define xPin A0
 #define yPin A1
 #define zPin A2
-#define potential 9
-#define confirmed 8
+#define LED 8
+#define MOTOR 9 
 
 
 bool possibleFall = false;
@@ -17,15 +17,41 @@ float magnitudeSum = 0;
 int magnitudeCount = 0;
 unsigned long avgWindowStart = 0;
 float prevMagnitude = 0;
+int impactConsecutiveCount = 0;
+unsigned long lastPossibleFallEnd = 0;
+bool potentialTriggerArmed = true;
+unsigned long calmStartTime = 0;
+unsigned long lastBlinkTime = 0;
+bool ledBlinkState = false;
 
 const float impact_threshold = 130.0; // subject to change
-const float stillness_threshold = 5.0; // tolerates sensor noise and minor movement
+const float stillness_threshold = 7.0; // tolerates sensor noise and minor movement
 const float cancel_threshold = 80.0;  // only considerable movement cancels the fall
 const unsigned long confirm_time = 10000; 
+const int impact_samples_required = 3;               // debounce impact trigger
+const unsigned long possible_fall_cooldown = 6000;   // ignore retriggers for 6s after reset
+const unsigned long rearm_calm_time = 3000;          // calm time before allowing next potential trigger
+const unsigned long led_blink_interval = 1000;        // slower LED blinking during possible fall
 
 float x0 = 0;
 float y0 = 0;
 float z0 = 0;
+
+static void resetPossibleFallState(bool rearmTrigger) {
+    possibleFall = false;
+    stillnessStart = 0;
+    magnitudeSum = 0;
+    magnitudeCount = 0;
+    avgWindowStart = 0;
+    prevMagnitude = 0;
+    impactConsecutiveCount = 0;
+    calmStartTime = 0;
+    fallStartTime = 0;
+    ledBlinkState = false;
+    digitalWrite(LED, LOW);
+    lastPossibleFallEnd = millis();
+    potentialTriggerArmed = rearmTrigger;
+}
 
 void calibrateAccelerometer() {
     Serial.println("Calibrating accelerometer... keep sensor still.");
@@ -72,6 +98,21 @@ void spacialReadings(){
     delay(250);
 }
 
+void buzzOnce(int duration = 1000) {
+    digitalWrite(MOTOR, HIGH);
+    delay(duration);
+    digitalWrite(MOTOR, LOW);
+}
+
+void buzzMultiple(int times, int duration = 1000, int gap = 1000) {
+    for (int i = 0; i < times; i++) {
+        digitalWrite(MOTOR, HIGH);
+        delay(duration);
+        digitalWrite(MOTOR, LOW);
+        delay(gap);
+    }
+}
+
 void fall(){
     accelData reading = readings();
 
@@ -80,20 +121,54 @@ void fall(){
     float dz = fabs(reading.z - z0);
 
     float magnitude = sqrt((dx*dx) + (dy*dy) + (dz*dz));
-    Serial.println(magnitude);
+    //Serial.println(magnitude);
 
-    if(!possibleFall && magnitude > impact_threshold && reading.z < 400){
-        possibleFall = true;
-        fallStartTime = millis();
-        stillnessStart = 0;
-        magnitudeSum = 0;
-        magnitudeCount = 0;
-        avgWindowStart = 0;  // will be set after the 3s settling period
-        prevMagnitude = magnitude;
-        Serial.println("Possible fall detected... waiting 3 seconds before checking for stillness.");
+    if(!possibleFall){
+        digitalWrite(LED, LOW);  // Ensure LED is off when not in a fall state
+        // Re-arm once cooldown has fully expired after a reset.
+        if (!potentialTriggerArmed && millis() - lastPossibleFallEnd >= possible_fall_cooldown) {
+            potentialTriggerArmed = true;
+            calmStartTime = 0;
+            impactConsecutiveCount = 0;
+            Serial.println("--- System re-armed. Ready to detect falls. ---");
+        }
+
+        bool impactNow = (magnitude > impact_threshold && reading.z < 400);
+
+        // Apply cooldown after resets to avoid immediate retrigger noise.
+        if (millis() - lastPossibleFallEnd < possible_fall_cooldown) {
+            impactConsecutiveCount = 0;
+        } else if (impactNow && potentialTriggerArmed) {
+            impactConsecutiveCount++;
+        } else {
+            impactConsecutiveCount = 0;
+        }
+
+        // Start possible fall only after consecutive impact samples.
+        if (impactConsecutiveCount >= impact_samples_required) {
+            possibleFall = true;
+            fallStartTime = millis();
+            stillnessStart = 0;
+            magnitudeSum = 0;
+            magnitudeCount = 0;
+            avgWindowStart = 0;  // will be set after the 3s settling period
+            prevMagnitude = magnitude;
+            lastBlinkTime = millis();
+            ledBlinkState = false;
+            impactConsecutiveCount = 0;
+            potentialTriggerArmed = false;
+            calmStartTime = 0;
+            Serial.println("Possible fall detected... waiting 3 seconds before checking for stillness.");
+            buzzOnce();
+        }
     }
     if(possibleFall){
-        digitalWrite(potential, HIGH);
+        // Non-blocking LED blink so fall logic can continue running.
+        if (millis() - lastBlinkTime >= led_blink_interval) {
+            ledBlinkState = !ledBlinkState;
+            digitalWrite(LED, ledBlinkState ? HIGH : LOW);
+            lastBlinkTime = millis();
+        }
 
         // Wait 3 seconds after impact before checking for stillness
         // (allows initial tumbling/sliding to settle)
@@ -126,9 +201,9 @@ void fall(){
             if (avgDelta >= cancel_threshold) {
                 // Considerable sustained movement - false alarm
                 Serial.println("Considerable movement detected - false alarm. Resetting.");
-                possibleFall = false;
-                stillnessStart = 0;
-                digitalWrite(potential, LOW);
+                resetPossibleFallState(false);
+                Serial.println("Reset complete. Monitoring resumed.");
+                return;
             } else if (avgDelta < stillness_threshold) {
                 // Avg change is small enough - sensor is still
                 if (stillnessStart == 0) {
@@ -137,8 +212,10 @@ void fall(){
                 } else if (millis() - stillnessStart >= confirm_time) {
                     // Sustained stillness confirmed - it's a fall
                     fallDetected = true;
-                    possibleFall = false;
+                    resetPossibleFallState(true);
                     Serial.println("Fall Confirmed!");
+                    buzzMultiple(3, 300, 1000); 
+                    return;
                 }
             } else {
                 // Minor movement - reset stillness timer
@@ -151,18 +228,21 @@ void fall(){
 
         // Safety timeout: if still possible fall after 30s with no confirmation, reset
         if(possibleFall && millis() - fallStartTime > 30000){
-            possibleFall = false;
-            stillnessStart = 0;
-            Serial.println("Timeout - not a fall. Resetting.");
-            digitalWrite(potential, LOW);
+            Serial.print("Timeout - not a fall (magnitude: ");
+            Serial.print(magnitude);
+            Serial.println("). Resetting...");
+            resetPossibleFallState(false);
+            Serial.print(">>> RESET COMPLETE. System will re-arm in ");
+            Serial.print(possible_fall_cooldown / 1000);
+            Serial.println("s. <<<");
+            return;
         }
     }
     if (fallDetected){
-        digitalWrite(confirmed, HIGH);
         Serial.println("ALERT: Send the emergency signal!");
+        digitalWrite(LED, HIGH);  // Turn on LED to indicate fall detected
+        delay(5000); // Keep LED on for 5 seconds to indicate alert state
+        digitalWrite(LED, LOW);   // Turn off LED after alert
         fallDetected = false;
-        delay(10000);
-        digitalWrite(confirmed, LOW);
-        digitalWrite(potential, LOW);
     }
 }

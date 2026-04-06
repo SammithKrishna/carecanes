@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include "motor.h"
 
-#define MOTOR_PIN 9
+#define MOTOR_PIN 8
 
-void turnOnMotor() {
+void turnOnMotorOn() {
     digitalWrite(MOTOR_PIN, HIGH);
 }
 

@@ -1,7 +1,8 @@
 #include "heart_sensor.h"
 #include "fall_detection.h"
-#include "motor.h"
 #include <Arduino.h>
+#define LED 8
+#define MOTOR 9 
 
 // HeartRateSensor heart;
 // bool fingerDetected = false;
@@ -9,6 +10,10 @@
 
 void setup() {
   Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  pinMode(MOTOR, OUTPUT);
+  digitalWrite(MOTOR, LOW);
+
   calibrateAccelerometer();
   Serial.println("Fall detection test ready.");
  // Serial.println("Initializing...");
@@ -47,7 +52,7 @@ void loop() {
   //   heart.update();
   // }
   // Fall detection test
-  spacialReadings();
+  // spacialReadings();
   fall();
   delay(25);
 }

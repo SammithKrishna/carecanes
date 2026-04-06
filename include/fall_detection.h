@@ -11,6 +11,8 @@ accelData readings();
 void spacialReadings();
 void fall();
 void calibrateAccelerometer();
+void buzzOnce(int duration);
+void buzzMultiple(int times, int duration, int gap);
 extern bool fallDetected;
 
 #endif
