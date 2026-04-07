@@ -1,11 +1,42 @@
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Arduino Version Below~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// #include <Arduino.h>
+// #include "blink.h"
+
+// #define LED 8
+
+
+// void blink(int input){
+//   if (input == 1){
+//     digitalWrite(LED, HIGH);
+//     Serial.println("LED On");
+//   } else if (input == 0) {
+//     digitalWrite(LED, LOW);
+//     Serial.println("LED Off");
+//   }
+// }
+
+// bool isValid(int input){
+//   return (input == 0 || input == 1);
+// }
+
+// void turnOnLED(){
+//     digitalWrite(LED, HIGH);
+// }
+
+// void turnOffLED(){
+//     digitalWrite(LED, LOW);
+// }
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ESP 32 Version Below~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 #include <Arduino.h>
 #include "blink.h"
 
-#define LED 8
+#define LED 2
 
-
-void blink(int input){
-  if (input == 1){
+void blink(int input) {
+  if (input == 1) {
     digitalWrite(LED, HIGH);
     Serial.println("LED On");
   } else if (input == 0) {
@@ -14,14 +45,14 @@ void blink(int input){
   }
 }
 
-bool isValid(int input){
+bool isValid(int input) {
   return (input == 0 || input == 1);
 }
 
-void turnOnLED(){
-    digitalWrite(LED, HIGH);
+void turnOnLED() {
+  digitalWrite(LED, HIGH);
 }
 
-void turnOffLED(){
-    digitalWrite(LED, LOW);
+void turnOffLED() {
+  digitalWrite(LED, LOW);
 }
