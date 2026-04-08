@@ -152,6 +152,16 @@
 #include "fall_detection.h"
 #include "heart_sensor.h"
 
+#define BLYNK_TEMPLATE_ID "TMPL2EMOWsAgH"
+#define BLYNK_TEMPLATE_NAME "Care Cane"
+#define BLYNK_AUTH_TOKEN "Ny5hwxqZQOERNkt3EjdgmDH0IL_NF1d4"
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+
+char ssid[] = "Sammios";
+char pass[] = "2817881605";
+
 #define xPin 34
 #define yPin 35
 #define zPin 32
@@ -172,8 +182,9 @@ bool potentialTriggerArmed = true;
 unsigned long calmStartTime = 0;
 unsigned long lastBlinkTime = 0;
 bool ledBlinkState = false;
+unsigned long lastImpactTime = 0;
 
-const float impact_threshold = 130.0;
+const float impact_threshold = 200.0;
 const float stillness_threshold = 7.0;
 const float cancel_threshold = 80.0;
 const unsigned long confirm_time = 10000;
@@ -258,6 +269,19 @@ void buzzMultiple(int times, int duration, int gap) {
     }
 }
 
+void sendEmergencyAlert(const char* reason) {
+  Serial.print("Sending Blynk emergency alert: ");
+  Serial.println(reason);
+  if (Blynk.connected()) {
+    Blynk.logEvent("emergency_alert", reason);
+    Serial.println(">>> Blynk event sent successfully.");
+  } else if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("(WiFi connected but Blynk server not connected - alert not sent)");
+  } else {
+    Serial.println("(WiFi not connected - alert not sent)");
+  }
+}
+
 void fall() {
     accelData reading = readings();
 
@@ -266,6 +290,17 @@ void fall() {
     float dz = fabs(reading.z - z0);
 
     float magnitude = sqrt((dx * dx) + (dy * dy) + (dz * dz));
+    static float lastMag = 0;
+    float deltaMag = fabs(magnitude - lastMag);
+    lastMag = magnitude;
+
+    // DEBUG - remove after tuning threshold
+    static unsigned long lastDebugPrint = 0;
+    if (millis() - lastDebugPrint >= 200) {
+        //Serial.print("MAG: "); Serial.print(magnitude);
+       // Serial.print("  DELTA: "); Serial.println(deltaMag);
+        lastDebugPrint = millis();
+    }
 
     if (!possibleFall) {
         digitalWrite(LED, LOW);
@@ -277,13 +312,15 @@ void fall() {
             Serial.println("--- System re-armed. Ready to detect falls. ---");
         }
 
-        bool impactNow = (magnitude > impact_threshold && reading.z < 400);
+        bool impactNow = (deltaMag > impact_threshold);
 
         if (millis() - lastPossibleFallEnd < possible_fall_cooldown) {
             impactConsecutiveCount = 0;
+            lastImpactTime = 0;
         } else if (impactNow && potentialTriggerArmed) {
             impactConsecutiveCount++;
-        } else {
+            lastImpactTime = millis();
+        } else if (millis() - lastImpactTime >= 300) {
             impactConsecutiveCount = 0;
         }
 
@@ -319,7 +356,6 @@ void fall() {
 
         if (avgWindowStart == 0) {
             avgWindowStart = millis();
-            prevMagnitude = magnitude;
             Serial.println("Settling period over. Now checking for stillness...");
         }
 
@@ -398,6 +434,25 @@ void setup() {
   pinMode(MOTOR, OUTPUT);
   digitalWrite(MOTOR, LOW);
   calibrateAccelerometer();
+
+  // Non-blocking WiFi + Blynk — fall detection works even without internet
+  WiFi.begin(ssid, pass);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("WiFi connected");
+
+  Blynk.config(BLYNK_AUTH_TOKEN);
+
+  if (Blynk.connect(10000)) {
+    Serial.println("Blynk connected");
+  } else {
+    Serial.println("Blynk connection failed");
+  }
+
   Serial.println("Fall detection test ready.");
   Serial.println("Initializing...");
 
@@ -405,6 +460,9 @@ void setup() {
     Serial.println("MAX30105 was not found. Please check wiring/power.");
     while (1);
   }
+
+  delay(2000);
+  sendEmergencyAlert("Test alert");
 
   Serial.println("Heart sensor standby. It will be used after a confirmed fall.");
 }
@@ -458,6 +516,7 @@ void loop() {
         Serial.println("Starting 60-second heart-rate check...");
       } else if (!emergencyAlertSent && elapsed >= FALL_RESPONSE_WINDOW_MS) {
         Serial.println("ALERT: No finger detected in time. Send the emergency signal!");
+        sendEmergencyAlert("Your elderly has fallen. Send Help!");
         emergencyAlertSent = true;
         emergencyAlertTime = millis();
       } else if (emergencyAlertSent && millis() - emergencyAlertTime >= 10000) {
@@ -501,6 +560,7 @@ void loop() {
             lastResponseCountdown = -1;
             emergencyAlertSent = false;
             Serial.println("Invalid BPM reading. LED remains on. Restarting 15-second finger window.");
+            sendEmergencyAlert("Abnormal heart rate detected after confirmed fall");
           }
         }
       }
@@ -511,5 +571,11 @@ void loop() {
     digitalWrite(LED, HIGH);
   }
 
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!Blynk.connected()){
+      Blynk.connect(1000);
+    }
+    Blynk.run(); // only runs when WiFi is up - stops DNS spam blocking fall detection
+  }
   delay(25);
 }
