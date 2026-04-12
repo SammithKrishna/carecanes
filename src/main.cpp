@@ -151,6 +151,7 @@
 #include <math.h>
 #include "fall_detection.h"
 #include "heart_sensor.h"
+#include <HTTPClient.h>
 
 #define BLYNK_TEMPLATE_ID "TMPL2EMOWsAgH"
 #define BLYNK_TEMPLATE_NAME "Care Cane"
@@ -158,6 +159,8 @@
 
 #include <WiFi.h>
 #include <BlynkSimpleEsp32.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 
 char ssid[] = "Sammios";
 char pass[] = "2817881605";
@@ -196,6 +199,38 @@ const unsigned long led_blink_interval = 1000;
 float x0 = 0;
 float accelY0 = 0;
 float z0 = 0;
+
+const char* callServerUrl = "https://care-cane-8955.twil.io/trigger-call";
+
+void triggerTwilioCall() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected - cannot trigger call");
+    return;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.begin(client, callServerUrl);
+  http.addHeader("Content-Type", "application/json");
+
+  int code = http.POST("{\"alert\":\"fall_detected\"}");
+
+  Serial.print("Call trigger HTTP code: ");
+  Serial.println(code);
+
+  if (code > 0) {
+    String response = http.getString();
+    Serial.print("Call trigger response: ");
+    Serial.println(response);
+  } else {
+    Serial.print("Call trigger error: ");
+    Serial.println(http.errorToString(code));
+  }
+
+  http.end();
+}
 
 static void resetPossibleFallState(bool rearmTrigger) {
     possibleFall = false;
@@ -444,6 +479,10 @@ void setup() {
   }
   Serial.println();
   Serial.println("WiFi connected");
+  Serial.print("ESP32 IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("Gateway IP: ");
+  Serial.println(WiFi.gatewayIP());
 
   Blynk.config(BLYNK_AUTH_TOKEN);
 
@@ -463,6 +502,9 @@ void setup() {
 
   delay(2000);
   sendEmergencyAlert("Test alert");
+
+  delay(5000);
+  triggerTwilioCall();
 
   Serial.println("Heart sensor standby. It will be used after a confirmed fall.");
 }
@@ -517,6 +559,7 @@ void loop() {
       } else if (!emergencyAlertSent && elapsed >= FALL_RESPONSE_WINDOW_MS) {
         Serial.println("ALERT: No finger detected in time. Send the emergency signal!");
         sendEmergencyAlert("Your elderly has fallen. Send Help!");
+        triggerTwilioCall();
         emergencyAlertSent = true;
         emergencyAlertTime = millis();
       } else if (emergencyAlertSent && millis() - emergencyAlertTime >= 10000) {
